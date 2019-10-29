@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+  <head>
+    <title>Introduction to penalized regression</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Byron C. Jaeger" />
+    <meta name="date" content="2019-10-29" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Introduction to penalized regression
+### Byron C. Jaeger
+### October 29, 2019
+
+---
+
+class: center, middle
+
+# What is it?
+
+---
+
+
+
+
+# Penalized regression
+
+**What we already know:** stepwise selection.
+
+--
+
+**Alternative:** Fit a model containing all of the potential predictors, and *constrain* the estimated regression coefficients. 
+
+--
+
+**Seems dumb!** (it's not) It isn't immediately obvious as to why we would add bias to our model by shrinking regression coefficients towards zero. 
+
+**Examples**
+
+- Ridge regression
+
+- Lasso regression
+
+---
+
+# Ridge regression
+
+Least squares fitting procedures estimate `\(\beta_1, \beta_2, \ldots \beta_p\)` using the values that minimize `$$RSS = \sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2$$`
+
+Ridge regression minimizes a penalizing criteria: `$$\sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2 + \lambda \sum_{j=1}^p \beta_j^2$$`
+
+in other words, `\(RSS + \lambda \cdot \text{penalty}\)`. 
+
+`\(\lambda &gt; 0\)` is a tuning parameter that controls how much the penalty term affects the regression coefficient. 
+
+**Question:** What happens if `\(\lambda = 0\)`? `\(\lambda = \infty\)`? (press p for answers)
+
+???
+
+When lambda is zero, the penalty term has no effect, and ridge regression will produce the least squares estimates. However, as lambda goes to infinity, the impact of the shrinkage penalty grows, and the ridge regression coefficient estimates will approach zero. 
+---
+
+# Tuning `\(\lambda\)`
+
+Least squares `\(\rightarrow\)` one set of coefficient estimates
+
+--
+
+Ridge regression `\(\rightarrow\)` one set of coefficient estimates **for each** `\(\lambda\)`
+
+--
+
+So, which set of regression coefficients is the one we want to use?
+
+As `\(\lambda\)` goes up, 
+
+- variance of the regression predictions goes down.
+
+- bias of the regression predictions goes up.
+
+There is a sweet spot where bias and variance are optimized for prediction.
+
+--
+
+**Problem** What if we have noisy data, and some variables shouldn't be included in the model?
+
+---
+
+# Lasso regression
+
+Lasso regression minimizes a penalizing criteria: `$$\sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2 + \lambda \sum_{j=1}^p \left| \beta_j \right|$$`
+
+Is this any different from ridge regression?
+
+--
+
+The penalty involves the absolute value of `\(\beta\)` instead of the squared value of `\(\beta\)`!
+
+--
+
+`\(\rightarrow\)` the lasso penalty can set coefficient values equal to zero.
+
+---
+background-image: url(figs/lasso_ridge_fig.png)
+background-position: 50% 50%
+background-size: 100%
+
+
+---
+
+# Ames housing data
+
+Describes the sale of individual residential property in Ames, Iowa from 2006 to 2010. 
+
+Contains 2930 observations and a large number of explanatory variables 
+ 
+- 23 nominal, 
+
+- 23 ordinal, 
+
+- 14 discrete,
+
+- 20 continuous
+
+involved in assessing home values. 
+
+(A beefed up Sacramento housing dataset)
+
+
+
+```r
+library(AmesHousing)
+ames &lt;- make_ames() 
+set.seed(32987)
+```
+
+---
+
+# Junk variables
+
+We wouldn't want to make this too easy
+
+
+```r
+junk_names &lt;- paste0('junk_', 1:500)
+
+for(j in junk_names) ames[[j]] &lt;- rnorm(n = nrow(ames))
+```
+
+
+---
+
+# `Sale_Price`
+
+
+```r
+hist(ames$Sale_Price, xlab = 'Sale price, dollars')
+```
+
+![](index_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;
+
+---
+
+# `Sale_Price`
+
+
+```r
+ames$Sale_Price %&lt;&gt;% log()
+hist(ames$Sale_Price)
+```
+
+![](index_files/figure-html/unnamed-chunk-4-1.png)&lt;!-- --&gt;
+
+---
+
+# Train/Test sets
+
+Make a training and testing set using `rsample`
+
+
+```r
+library(rsample)
+
+ames_splits &lt;- initial_split(ames)
+ames_train &lt;- training(ames_splits)
+ames_test &lt;- testing(ames_splits)
+```
+
+---
+
+# `recipes`
+
+The `ames` data have categorical variables that need to be one-hot coded for analysis using ridge (and lasso) regression:
+
+
+```r
+library(recipes)
+
+pre_proc &lt;- recipe(ames_train, Sale_Price ~ .) %&gt;% 
+  step_center(all_numeric()) %&gt;% 
+  step_scale(all_numeric()) %&gt;% 
+  step_dummy(all_nominal()) %&gt;% 
+  prep()
+
+.train &lt;- juice(pre_proc)
+.test &lt;- bake(pre_proc, new_data = ames_test)
+```
+
+---
+
+# Least squares
+
+Classic
+
+
+```r
+fit_least &lt;- glm(Sale_Price ~ ., data = .train)
+```
+
+---
+
+# `glmnet`
+
+The `glmnet` package is a premier kit for ridge and lasso regression.
+
+
+
+```r
+library(glmnet)
+
+yvar &lt;- 'Sale_Price'
+
+xvars &lt;- setdiff( names(.train), yvar)
+
+fit_ridge &lt;- cv.glmnet(
+  y = as.matrix(.train)[, yvar],
+  x = as.matrix(.train)[, xvars],
+  alpha = 0 # this is what gives ridge penalty
+)
+```
+
+---
+
+# `glmnet`
+
+The `glmnet` package is a premier kit for ridge and lasso regression.
+
+
+```r
+plot(fit_ridge)
+```
+
+![](index_files/figure-html/unnamed-chunk-9-1.png)&lt;!-- --&gt;
+
+---
+
+# Lasso model
+
+
+```r
+fit_lasso &lt;- cv.glmnet(
+  y = as.matrix(.train)[, yvar],
+  x = as.matrix(.train)[, xvars],
+  alpha = 1 # this is what gives lasso penalty
+)
+```
+
+
+---
+
+# Lasso model
+
+
+```r
+plot(fit_lasso)
+```
+
+![](index_files/figure-html/unnamed-chunk-11-1.png)&lt;!-- --&gt;
+
+---
+
+# Lasso model
+
+A look a the solution path of a lasso model
+
+
+```r
+plot(fit_lasso$glmnet.fit)
+```
+
+![](index_files/figure-html/unnamed-chunk-12-1.png)&lt;!-- --&gt;
+
+
+---
+
+# Model predictions
+
+
+```r
+rmse &lt;- function(x,y) sqrt(mean((x-y)^2))
+
+prd_least &lt;- predict(fit_least, newdata = .test)
+
+prd_ridge &lt;- predict(
+  fit_ridge, 
+  newx = as.matrix(.test)[, xvars], 
+  s = 'lambda.min'
+)
+
+prd_lasso &lt;- predict(
+  object = fit_lasso, 
+  newx = as.matrix(.test)[, xvars], 
+  s = 'lambda.min'
+)
+```
+
+---
+
+# Comparing predictions
+
+
+```r
+ref_rmse &lt;- rmse( mean(.train$Sale_Price), .test$Sale_Price )
+
+model_R2 &lt;- list(
+  least = prd_least,
+  ridge = prd_ridge,
+  lasso = prd_lasso
+) %&gt;% 
+  map(~ 1 - rmse(x = .x, y = .test$Sale_Price) / ref_rmse)
+
+model_R2
+```
+
+```
+## $least
+## [1] 0.5814915
+## 
+## $ridge
+## [1] 0.6120002
+## 
+## $lasso
+## [1] 0.6078015
+```
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Intro to glmnet
+
+This is a lecture for BIOS students in the *Introduction to Linear Models* course.
+
+<!-- badges: start -->
+<!-- badges: end -->
+

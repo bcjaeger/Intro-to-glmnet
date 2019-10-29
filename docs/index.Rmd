@@ -1,0 +1,365 @@
+---
+title: "Introduction to penalized regression"
+author: "Byron C. Jaeger"
+date: "October 29, 2019"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+class: center, middle
+
+# What is it?
+
+---
+
+```{r setup, include=FALSE}
+
+options(htmltools.dir.version = FALSE)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.width = 12,
+  fig.height = 6,
+  dpi = 72 * 5,
+  cache = FALSE,
+  message = FALSE
+)
+
+library(diagram)
+library(tidyverse)
+library(gam)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(widgetframe)
+library(magrittr)
+library(glmnet)
+library(MASS)
+library(glue)
+library(DT)
+
+```
+
+
+# Penalized regression
+
+**What we already know:** stepwise selection.
+
+--
+
+**Alternative:** Fit a model containing all of the potential predictors, and *constrain* the estimated regression coefficients. 
+
+--
+
+**Seems dumb!** (it's not) It isn't immediately obvious as to why we would add bias to our model by shrinking regression coefficients towards zero. 
+
+**Examples**
+
+- Ridge regression
+
+- Lasso regression
+
+---
+
+# Ridge regression
+
+Least squares fitting procedures estimate $\beta_1, \beta_2, \ldots \beta_p$ using the values that minimize $$RSS = \sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2$$
+
+Ridge regression minimizes a penalizing criteria: $$\sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2 + \lambda \sum_{j=1}^p \beta_j^2$$
+
+in other words, $RSS + \lambda \cdot \text{penalty}$. 
+
+$\lambda > 0$ is a tuning parameter that controls how much the penalty term affects the regression coefficient. 
+
+**Question:** What happens if $\lambda = 0$? $\lambda = \infty$? (press p for answers)
+
+???
+
+When lambda is zero, the penalty term has no effect, and ridge regression will produce the least squares estimates. However, as lambda goes to infinity, the impact of the shrinkage penalty grows, and the ridge regression coefficient estimates will approach zero. 
+---
+
+# Tuning $\lambda$
+
+Least squares $\rightarrow$ one set of coefficient estimates
+
+--
+
+Ridge regression $\rightarrow$ one set of coefficient estimates **for each** $\lambda$
+
+--
+
+So, which set of regression coefficients is the one we want to use?
+
+As $\lambda$ goes up, 
+
+- variance of the regression predictions goes down.
+
+- bias of the regression predictions goes up.
+
+There is a sweet spot where bias and variance are optimized for prediction.
+
+--
+
+**Problem** What if we have noisy data, and some variables shouldn't be included in the model?
+
+---
+
+# Lasso regression
+
+Lasso regression minimizes a penalizing criteria: $$\sum_{i=1}^n \left( y_i - \beta_0 - \sum_{j=1}^p \beta_j x_{ij} \right)^2 + \lambda \sum_{j=1}^p \left| \beta_j \right|$$
+
+Is this any different from ridge regression?
+
+--
+
+The penalty involves the absolute value of $\beta$ instead of the squared value of $\beta$!
+
+--
+
+$\rightarrow$ the lasso penalty can set coefficient values equal to zero.
+
+---
+background-image: url(figs/lasso_ridge_fig.png)
+background-position: 50% 50%
+background-size: 100%
+
+
+---
+
+# Ames housing data
+
+Describes the sale of individual residential property in Ames, Iowa from 2006 to 2010. 
+
+Contains 2930 observations and a large number of explanatory variables 
+ 
+- 23 nominal, 
+
+- 23 ordinal, 
+
+- 14 discrete,
+
+- 20 continuous
+
+involved in assessing home values. 
+
+(A beefed up Sacramento housing dataset)
+
+
+```{r}
+
+library(AmesHousing)
+ames <- make_ames() 
+set.seed(32987)
+
+
+```
+
+---
+
+# Junk variables
+
+We wouldn't want to make this too easy
+
+```{r}
+
+junk_names <- paste0('junk_', 1:500)
+
+for(j in junk_names) ames[[j]] <- rnorm(n = nrow(ames))
+
+```
+
+
+---
+
+# `Sale_Price`
+
+```{r}
+
+hist(ames$Sale_Price, xlab = 'Sale price, dollars')
+
+```
+
+---
+
+# `Sale_Price`
+
+```{r}
+
+ames$Sale_Price %<>% log()
+hist(ames$Sale_Price)
+
+```
+
+---
+
+# Train/Test sets
+
+Make a training and testing set using `rsample`
+
+```{r}
+
+library(rsample)
+
+ames_splits <- initial_split(ames)
+ames_train <- training(ames_splits)
+ames_test <- testing(ames_splits)
+
+```
+
+---
+
+# `recipes`
+
+The `ames` data have categorical variables that need to be one-hot coded for analysis using ridge (and lasso) regression:
+
+```{r}
+
+library(recipes)
+
+pre_proc <- recipe(ames_train, Sale_Price ~ .) %>% 
+  step_center(all_numeric()) %>% 
+  step_scale(all_numeric()) %>% 
+  step_dummy(all_nominal()) %>% 
+  prep()
+
+.train <- juice(pre_proc)
+.test <- bake(pre_proc, new_data = ames_test)
+
+
+```
+
+---
+
+# Least squares
+
+Classic
+
+```{r}
+
+
+fit_least <- glm(Sale_Price ~ ., data = .train)
+
+```
+
+---
+
+# `glmnet`
+
+The `glmnet` package is a premier kit for ridge and lasso regression.
+
+
+```{r}
+
+library(glmnet)
+
+yvar <- 'Sale_Price'
+
+xvars <- setdiff( names(.train), yvar)
+
+fit_ridge <- cv.glmnet(
+  y = as.matrix(.train)[, yvar],
+  x = as.matrix(.train)[, xvars],
+  alpha = 0 # this is what gives ridge penalty
+)
+
+```
+
+---
+
+# `glmnet`
+
+The `glmnet` package is a premier kit for ridge and lasso regression.
+
+```{r}
+
+plot(fit_ridge)
+
+```
+
+---
+
+# Lasso model
+
+```{r}
+
+fit_lasso <- cv.glmnet(
+  y = as.matrix(.train)[, yvar],
+  x = as.matrix(.train)[, xvars],
+  alpha = 1 # this is what gives lasso penalty
+)
+
+```
+
+
+---
+
+# Lasso model
+
+```{r}
+
+plot(fit_lasso)
+
+```
+
+---
+
+# Lasso model
+
+A look a the solution path of a lasso model
+
+```{r}
+
+plot(fit_lasso$glmnet.fit)
+
+```
+
+
+---
+
+# Model predictions
+
+```{r, warning=FALSE}
+
+rmse <- function(x,y) sqrt(mean((x-y)^2))
+
+prd_least <- predict(fit_least, newdata = .test)
+
+prd_ridge <- predict(
+  fit_ridge, 
+  newx = as.matrix(.test)[, xvars], 
+  s = 'lambda.min'
+)
+
+prd_lasso <- predict(
+  object = fit_lasso, 
+  newx = as.matrix(.test)[, xvars], 
+  s = 'lambda.min'
+)
+
+```
+
+---
+
+# Comparing predictions
+
+```{r}
+
+ref_rmse <- rmse( mean(.train$Sale_Price), .test$Sale_Price )
+
+model_R2 <- list(
+  least = prd_least,
+  ridge = prd_ridge,
+  lasso = prd_lasso
+) %>% 
+  map(~ 1 - rmse(x = .x, y = .test$Sale_Price) / ref_rmse)
+
+model_R2
+
+```
+
+
